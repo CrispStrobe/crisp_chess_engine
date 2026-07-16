@@ -26,6 +26,7 @@ import 'package:chess/chess.dart' as chess;
 import 'src/search.dart';
 
 export 'src/search.dart' show AlphaBetaSearch, SearchResult;
+export 'src/evaluation.dart' show evaluate, pieceValues;
 
 /// Searches the position given by [fen] to [depth] plies (iterative deepening)
 /// and returns the [SearchResult] — including the best move in UCI notation
