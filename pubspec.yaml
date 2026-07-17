@@ -1,6 +1,6 @@
 name: crisp_chess_engine
 description: A pure-Dart chess engine — alpha-beta search with null-move pruning, PVS, quiescence and a transposition table. No native code; runs everywhere Dart does.
-version: 0.6.0
+version: 0.7.0
 repository: https://github.com/CrispStrobe/crisp_chess_engine
 topics:
   - chess

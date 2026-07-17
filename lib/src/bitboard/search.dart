@@ -42,14 +42,26 @@ class BitboardSearch {
   static const int _ttMaxEntries = 1 << 20;
 
   // Position hashes along the current search path, for repetition detection.
+  // Seeded with the game's prior positions ([_gameHistory]) so the search also
+  // avoids repeating positions already reached in the actual game — otherwise
+  // it can draw a won game (or shuffle a won ending) by walking into a repeat.
   final List<int> _path = [];
+
+  // Prior game position keys, in order, the last being the current root. Empty
+  // if the caller didn't supply history (search treats the position in a
+  // vacuum, as before).
+  final List<int> _gameHistory;
 
   // Leaf evaluator. Overridable so alternative evaluations can be A/B tested in
   // self-play without touching the search; defaults to [evaluatePosition].
   final int Function(Position) _eval;
 
-  BitboardSearch(this.pos, {int Function(Position)? evaluator})
-      : _eval = evaluator ?? evaluatePosition;
+  BitboardSearch(
+    this.pos, {
+    int Function(Position)? evaluator,
+    List<int>? repetitionHistory,
+  })  : _eval = evaluator ?? evaluatePosition,
+        _gameHistory = repetitionHistory ?? const [];
 
   void stop() => _stopped = true;
 
@@ -65,7 +77,9 @@ class BitboardSearch {
   }) {
     _stopped = false;
     _nodes = 0;
-    _path.clear();
+    _path
+      ..clear()
+      ..addAll(_gameHistory); // seed repetition detection with the game so far
     _deadlineMs = timeBudget?.inMilliseconds ?? 0;
     _clock
       ..reset()

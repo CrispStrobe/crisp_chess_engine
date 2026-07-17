@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.7.0
+
+Repetition awareness across the actual game, not just the search tree.
+
+### Added
+
+- `BitboardSearch(..., repetitionHistory: [...])` seeds repetition detection
+  with the game's prior position keys (in order, the current position last).
+  Without it the search evaluates each position in a vacuum and can *walk into a
+  repetition* — drawing a won game, or shuffling a won ending forever at shallow
+  depth. With the game history, a repeat scores as a draw, so the engine avoids
+  it when winning (and seeks it when losing).
+- `Position.hash()` is the key to collect for that list.
+
+Effect: at depth 6 (beyond the mate horizon) K+R vs K — including a central lone
+king — now converts instead of shuffling to the 50-move rule. Purely additive:
+callers that pass no history behave exactly as before.
+
 ## 0.6.0
 
 Endgame mop-up evaluation, so the engine converts won bare-king endings instead
