@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.0
+
+Search efficiency for the bitboard engine: ~32% fewer nodes to reach a given
+depth, so it searches meaningfully deeper within the same time budget (which is
+what matters on slower devices). No change to the public API.
+
+### Added
+
+- Aspiration windows: each iterative-deepening iteration searches a narrow band
+  around the previous score, widening only on a fail. Reaches greater depth in a
+  fixed time budget.
+- Static Exchange Evaluation (`Position.see`) and SEE-based pruning of losing
+  captures in quiescence — the largest node reduction, and it keeps quiescence
+  from exploding on bad capture sequences. SEE is covered by unit tests.
+
 ## 0.3.0
 
 Adds a native bitboard engine — 20-60x the nodes/sec of the original

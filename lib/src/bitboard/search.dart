@@ -67,11 +67,13 @@ class BitboardSearch {
       ..start();
 
     SearchResult? best;
+    var prevScore = 0;
     for (var depth = 1; depth <= maxDepth; depth++) {
       if (_stopped) break;
-      final result = _searchRoot(depth);
+      final result = _aspirationSearch(depth, prevScore);
       if (result != null && !_stopped) {
         best = result;
+        prevScore = result.score;
         onDepthComplete?.call(result);
         // A forced mate is found — no point searching deeper.
         if (result.score.abs() >= _mate - _maxPly) break;
@@ -82,7 +84,33 @@ class BitboardSearch {
     return best;
   }
 
-  SearchResult? _searchRoot(int depth) {
+  /// Aspiration windows: search a narrow band around the previous iteration's
+  /// score. Most iterations land inside it and prune far more; on a fail we
+  /// widen and re-search. Shallow depths use a full window (score is unstable).
+  SearchResult? _aspirationSearch(int depth, int prevScore) {
+    if (depth <= 3) return _searchRoot(depth, -_inf, _inf);
+    var delta = 30;
+    var alpha = prevScore - delta;
+    var beta = prevScore + delta;
+    while (true) {
+      final result = _searchRoot(depth, alpha, beta);
+      if (result == null || _stopped) return result;
+      if (result.score <= alpha) {
+        // Fail low: widen downward, keep beta near for a tight re-search.
+        beta = (alpha + beta) ~/ 2;
+        alpha = prevScore - delta * 2;
+        delta *= 2;
+      } else if (result.score >= beta) {
+        beta = prevScore + delta * 2; // fail high: widen upward
+        delta *= 2;
+      } else {
+        return result; // inside the window — exact
+      }
+      if (delta > 800) return _searchRoot(depth, -_inf, _inf); // give up, full
+    }
+  }
+
+  SearchResult? _searchRoot(int depth, int alpha, int beta) {
     final hash = pos.hash();
     final ttMove = _tt[hash]?.move ?? 0;
 
@@ -92,8 +120,6 @@ class BitboardSearch {
 
     var bestMove = 0;
     var bestScore = -_inf;
-    var alpha = -_inf;
-    const beta = _inf;
     var legal = 0;
 
     for (final m in moves) {
@@ -114,6 +140,7 @@ class BitboardSearch {
         bestMove = m;
       }
       if (score > alpha) alpha = score;
+      if (alpha >= beta) break; // fail-high: report a lower bound for aspiration
     }
 
     if (legal == 0) return null; // mate or stalemate at the root
@@ -256,6 +283,10 @@ class BitboardSearch {
     _orderCaptures(moves);
 
     for (final m in moves) {
+      // Skip captures that lose material by static exchange — they can't raise
+      // alpha and searching them explodes the quiescence tree. Promotions are
+      // always tried (SEE doesn't value the new queen).
+      if (!moveIsPromotion(m) && pos.see(m) < 0) continue;
       pos.makeMove(m);
       if (!pos.moverKingSafe) {
         pos.unmakeMove();

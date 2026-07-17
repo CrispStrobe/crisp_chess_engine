@@ -168,6 +168,78 @@ class Position {
   bool get moverKingSafe =>
       !isSquareAttacked(_kingSquareOf(turn ^ 1), turn);
 
+  static const List<int> _seeValues = [100, 320, 330, 500, 900, 20000];
+
+  /// All pieces of either color attacking [sq] given occupancy [occ].
+  int _attackersTo(int sq, int occ) {
+    final bishopsQueens = pieces[white][bishop] |
+        pieces[black][bishop] |
+        pieces[white][queen] |
+        pieces[black][queen];
+    final rooksQueens = pieces[white][rook] |
+        pieces[black][rook] |
+        pieces[white][queen] |
+        pieces[black][queen];
+    return (pawnAttacks[black][sq] & pieces[white][pawn]) |
+        (pawnAttacks[white][sq] & pieces[black][pawn]) |
+        (knightAttacks[sq] & (pieces[white][knight] | pieces[black][knight])) |
+        (kingAttacks[sq] & (pieces[white][king] | pieces[black][king])) |
+        (bishopAttacks(sq, occ) & bishopsQueens) |
+        (rookAttacks(sq, occ) & rooksQueens);
+  }
+
+  int _leastValuableAttacker(int attackers, int side) {
+    for (var t = pawn; t <= king; t++) {
+      final bb = attackers & pieces[side][t];
+      if (bb != 0) return lsb(bb);
+    }
+    return -1;
+  }
+
+  /// Static Exchange Evaluation: the material a capture [move] wins or loses
+  /// after the full sequence of optimal recaptures on the target square, in
+  /// centipawns from the moving side's view. Negative means a losing capture.
+  int see(int move) {
+    final to = moveTo(move);
+    final from = moveFrom(move);
+    var occ = occAll;
+    int targetType;
+    if (moveIsEnPassant(move)) {
+      targetType = pawn;
+      final capSq = turn == white ? to - 8 : to + 8;
+      occ ^= 1 << capSq; // remove ep-captured pawn so x-rays are correct
+    } else {
+      final t = mailbox[to];
+      if (t == -1) return 0; // not a capture
+      targetType = t;
+    }
+
+    final gain = List<int>.filled(32, 0);
+    gain[0] = _seeValues[targetType];
+    var attackerType = mailbox[from];
+    var fromBit = 1 << from;
+    var side = turn;
+    var d = 0;
+
+    // Run the full swap sequence (no early pruning — it's subtle and SEE
+    // sequences on one square are short, so correctness wins).
+    while (true) {
+      d++;
+      gain[d] = _seeValues[attackerType] - gain[d - 1];
+      occ ^= fromBit; // the attacker that just captured leaves the board
+      side ^= 1;
+      final attackers = _attackersTo(to, occ) & occ;
+      final sq = _leastValuableAttacker(attackers, side);
+      if (sq < 0) break;
+      fromBit = 1 << sq;
+      attackerType = mailbox[sq];
+    }
+    while (--d > 0) {
+      gain[d - 1] = -(-gain[d - 1] > gain[d] ? -gain[d - 1] : gain[d]);
+    }
+    return gain[0];
+  }
+
   /// A full 64-bit position key (native ints), folding all piece bitboards plus
   /// side-to-move, castling rights and the en-passant square. Cheap — no FEN
   /// rebuild — and collisions are negligible for a per-search table.
