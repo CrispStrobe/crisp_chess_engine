@@ -341,23 +341,38 @@ class AlphaBetaSearch {
   /// Avoids rebuilding the FEN string (which `_game.fen` does every call by
   /// scanning the board *and* allocating), and — unlike the old FEN-prefix
   /// hash — includes castling rights and the en-passant square, so distinct
-  /// positions no longer collide in the transposition table. FNV-1a mixing.
+  /// positions no longer collide in the transposition table.
+  ///
+  /// Jenkins one-at-a-time, a 32-bit hash using only shifts and adds so every
+  /// intermediate stays well under 2^53 — meaning it computes identically on
+  /// the VM and under dart2js (where ints are doubles and a 64-bit multiply
+  /// would lose precision, or a 64-bit literal would not even compile). The
+  /// engine runs on web too, so this has to be dart2js-safe.
   int _positionKey() {
-    var h = 0xcbf29ce484222325;
-    const prime = 0x100000001b3;
+    var h = 0;
     final board = _game.board;
     for (var i = chess.Chess.SQUARES_A8; i <= chess.Chess.SQUARES_H1; i++) {
       if ((i & 0x88) != 0) continue; // skip off-board 0x88 squares
       final piece = board[i];
       if (piece != null) {
-        h = (h ^ (i * 13 + piece.type.shift * 2 + piece.color.index + 1)) *
-            prime;
+        h = _mix(h, i * 13 + piece.type.shift * 2 + piece.color.index + 1);
       }
     }
-    h = (h ^ (_game.turn == chess.Color.WHITE ? 1 : 2)) * prime;
-    h = (h ^ _game.castling[chess.Color.WHITE]) * prime;
-    h = (h ^ _game.castling[chess.Color.BLACK]) * prime;
-    h = (h ^ ((_game.ep_square ?? chess.Chess.EMPTY) + 2)) * prime;
+    h = _mix(h, _game.turn == chess.Color.WHITE ? 1 : 2);
+    h = _mix(h, _game.castling[chess.Color.WHITE]);
+    h = _mix(h, _game.castling[chess.Color.BLACK]);
+    h = _mix(h, (_game.ep_square ?? chess.Chess.EMPTY) + 2);
+    // Finalization avalanche.
+    h = (h + (h << 3)) & 0xffffffff;
+    h ^= h >> 11;
+    h = (h + (h << 15)) & 0xffffffff;
+    return h;
+  }
+
+  static int _mix(int h, int value) {
+    h = (h + value) & 0xffffffff;
+    h = (h + (h << 10)) & 0xffffffff;
+    h ^= h >> 6;
     return h;
   }
 
