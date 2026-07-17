@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.6.0
+
+Endgame mop-up evaluation, so the engine converts won bare-king endings instead
+of shuffling.
+
+### Added
+
+- A mop-up term: when one side has only its king and the other has mating
+  material (a rook or queen), the evaluation drives the lone king toward a
+  corner and brings the strong king in — a monotonic gradient toward the mate.
+
+  Material + PST alone gives no gradient in these endings, so a shallow search
+  never converts them. With mop-up, K+Q vs K is mated at depth 6 and K+R vs K at
+  depth 8, both of which the material+PST baseline shuffles indefinitely.
+
+The term only fires when a king is truly bare, so it has no effect on contested
+middlegames (verified: the tactical node counts are unchanged).
+
 ## 0.5.0
 
 Positional evaluation terms for the bitboard engine, verified stronger by

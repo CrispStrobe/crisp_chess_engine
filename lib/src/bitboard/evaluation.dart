@@ -38,9 +38,47 @@ int _blackIdx(int sq) => (sq >> 3) * 8 + (sq & 7);
 /// No terminal/draw detection here — the search owns that (it scores mate and
 /// stalemate from an empty move list and handles the 50-move rule / repetition).
 int evaluatePosition(Position p) {
-  final white_ = _materialPstWhitePov(p) + _extendedWhitePov(p);
+  final white_ =
+      _materialPstWhitePov(p) + _extendedWhitePov(p) + _mopUpWhitePov(p);
   return p.turn == white ? white_ : -white_;
 }
+
+// Mop-up: in a bare-king endgame (one side has only its king, the other has
+// mating material) material+PST gives no gradient, so a shallow search just
+// shuffles and never converts. Drive the lone king toward a corner and bring
+// the strong king in — a monotonic gradient toward the mate. Only fires when a
+// king is truly bare, so it can never distort a contested middlegame.
+int _mopUpWhitePov(Position p) {
+  final whiteBare = (p.occ[white] ^ p.pieces[white][king]) == 0;
+  final blackBare = (p.occ[black] ^ p.pieces[black][king]) == 0;
+  if (whiteBare == blackBare) return 0; // both bare, or neither
+
+  if (blackBare) {
+    // White mates — needs a rook or queen (KBN etc. is not handled here).
+    if ((p.pieces[white][rook] | p.pieces[white][queen]) == 0) return 0;
+    return _mopUp(lsb(p.pieces[black][king]), lsb(p.pieces[white][king]));
+  }
+  if ((p.pieces[black][rook] | p.pieces[black][queen]) == 0) return 0;
+  return -_mopUp(lsb(p.pieces[white][king]), lsb(p.pieces[black][king]));
+}
+
+int _mopUp(int loneKing, int strongKing) {
+  final cornerDrive = _centerManhattan(loneKing); // 0 (centre) .. 6 (corner)
+  final kingsClose = 14 - _manhattan(loneKing, strongKing); // 0 .. 14
+  return cornerDrive * 14 + kingsClose * 8;
+}
+
+// Manhattan distance from the board centre: 0 at the four centre squares, 6 at
+// the corners. Pushing the lone king here means pushing it to the edge/corner.
+int _centerManhattan(int sq) {
+  final f = sq & 7, r = sq >> 3;
+  final fd = f < 4 ? 3 - f : f - 4;
+  final rd = r < 4 ? 3 - r : r - 4;
+  return fd + rd;
+}
+
+int _manhattan(int a, int b) =>
+    ((a & 7) - (b & 7)).abs() + ((a >> 3) - (b >> 3)).abs();
 
 /// Material + piece-square tables only. Kept as the A/B baseline for the extra
 /// terms in [evaluatePosition] (self-play verification).
