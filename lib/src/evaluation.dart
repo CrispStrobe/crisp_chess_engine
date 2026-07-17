@@ -492,11 +492,20 @@ final _pstTables = {
 
 /// Evaluate the position from the side to move's perspective.
 /// Returns score in centipawns. Positive = good for side to move.
+///
+/// Checkmate is still reported (it short-circuits on `in_check`, so it costs
+/// nothing on quiet nodes), but draw/stalemate detection is deliberately left
+/// to the search, which already scores stalemate from an empty move list and
+/// handles the 50-move rule and repetition far more cheaply.
+///
+/// `in_draw`/`in_threefold_repetition` must never be called from here: they
+/// unwind and replay the *entire* move history — rebuilding the FEN for every
+/// ply on every evaluate() call — and the replay restores `turn` from the
+/// recorded States, which silently undid the search's in-place null move and
+/// produced illegal moves. `in_stalemate` is barely better: it runs a full
+/// generate_moves() on every quiet node.
 int evaluate(chess.Chess game) {
   if (game.in_checkmate) return -99999;
-  if (game.in_draw || game.in_stalemate || game.in_threefold_repetition) {
-    return 0;
-  }
 
   int whiteScore = 0;
   int blackScore = 0;

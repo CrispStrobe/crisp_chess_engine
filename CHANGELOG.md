@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.2.0
+
+Correctness and performance release. Anyone on 0.1.0 should upgrade: the search
+could return a move for the **wrong side**.
+
+### Fixed
+
+- **Search returned illegal moves.** Null-move pruning was implemented by
+  writing a modified FEN with `Chess.load()`, which calls `clear()` and wipes
+  the undo history — so every ancestor's `undo()` silently stopped restoring the
+  board. Compounding it, `evaluate()` called `in_draw` /
+  `in_threefold_repetition`, which unwind and replay the entire move history and
+  thereby restore `turn` behind the search's back, undoing the null move's turn
+  swap. From the opening position at depth >= 6 the engine answered `b8c6` — a
+  Black move — for White. Null move is now an O(1) in-place turn/en-passant
+  swap, and `evaluate()` no longer inspects draw state.
+- **Weak moves.** With the board corrupted mid-search the engine preferred
+  self-weakening moves such as `f2f3` and `a2a3` from the opening. It now plays
+  normal moves (`e2e4`, `g1f3`, `b1c3`).
+- **Transposition table collisions.** The position key was the hash of the FEN's
+  piece-placement + side-to-move prefix, ignoring castling rights and the
+  en-passant square, so genuinely different positions shared an entry. The key
+  now covers both.
+
+### Added
+
+- `AlphaBetaSearch.search(..., timeBudget:)` and
+  `searchPosition(..., timeBudget:)` — iterative deepening now returns the best
+  move from the last completed depth once the budget is spent, aborting
+  mid-iteration if needed. Strongly recommended for interactive callers: a fixed
+  depth of 8+ can take tens of seconds.
+
+### Changed
+
+- ~5x faster (about 3k -> 15k+ nodes/sec). `evaluate()` was rebuilding the FEN
+  for every ply of history on *every call* (two full history unwinds), and the
+  position key rebuilt the FEN on every node.
+- **Breaking (behavioural):** `evaluate()` is now a static evaluation. It still
+  reports checkmate, but no longer returns 0 for draws/stalemate — the search
+  owns terminal and repetition detection (it now uses a cheap position-key path
+  check instead of `in_threefold_repetition`).
+
 ## 0.1.0
 
 - Initial release: a pure-Dart chess engine (alpha-beta with null-move pruning,

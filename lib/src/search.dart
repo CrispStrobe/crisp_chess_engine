@@ -22,31 +22,64 @@ class AlphaBetaSearch {
   bool _stopped = false;
   int _nodes = 0;
 
+  // Time management. When [_deadlineMs] > 0 the search aborts once the clock
+  // passes it, so a single (potentially very deep) iteration can bail out
+  // mid-tree instead of running to completion.
+  final Stopwatch _clock = Stopwatch();
+  int _deadlineMs = 0;
+
   final List<List<String?>> _killers;
   final Map<String, int> _history = {};
   final TranspositionTable _tt = TranspositionTable();
+
+  // Position keys along the current search path, pushed/popped in
+  // _makeMove/_unmakeMove. Used for a cheap repetition check that avoids
+  // `chess`'s in_threefold_repetition, which rebuilds the FEN for every ply of
+  // history on every node (~1ms/node) and dominated search time.
+  final List<int> _path = <int>[];
 
   AlphaBetaSearch(this._game)
       : _killers = List.generate(64, (_) => [null, null]);
 
   void stop() => _stopped = true;
 
+  /// True once the time budget (if any) has been exhausted.
+  bool get _timeUp =>
+      _deadlineMs > 0 && _clock.elapsedMilliseconds >= _deadlineMs;
+
+  /// Run iterative deepening up to [maxDepth].
+  ///
+  /// If [timeBudget] is given the search returns the best move from the last
+  /// *fully completed* depth once the budget is spent, rather than blocking
+  /// until [maxDepth] is reached. This is what keeps move latency bounded on
+  /// slow devices.
   SearchResult? search(
     int maxDepth, {
     void Function(SearchResult)? onDepthComplete,
+    Duration? timeBudget,
   }) {
     _stopped = false;
     _nodes = 0;
+    _path.clear();
+    _deadlineMs = timeBudget?.inMilliseconds ?? 0;
+    _clock
+      ..reset()
+      ..start();
     SearchResult? bestResult;
 
     for (int depth = 1; depth <= maxDepth; depth++) {
       if (_stopped) break;
       final result = _searchRoot(depth);
+      // A time-out aborts mid-iteration and yields a null/partial root result;
+      // keep the previous completed depth's move in that case.
       if (result != null && !_stopped) {
         bestResult = result;
         onDepthComplete?.call(result);
       }
+      // Don't start a deeper iteration (each is much costlier) once time's up.
+      if (_timeUp) break;
     }
+    _clock.stop();
     return bestResult;
   }
 
@@ -54,7 +87,7 @@ class AlphaBetaSearch {
     final moves = _game.generate_moves();
     if (moves.isEmpty) return null;
 
-    final hash = _quickHash();
+    final hash = _positionKey();
     final ttEntry = _tt.probe(hash);
 
     // Pre-compute UCI strings for all moves and build scored list
@@ -77,7 +110,7 @@ class AlphaBetaSearch {
       _makeMove(sm.move);
       _nodes++;
       final score = -_alphaBeta(depth - 1, -beta, -alpha, 1);
-      _game.undo();
+      _unmakeMove();
 
       if (score > bestScore) {
         bestScore = score;
@@ -106,6 +139,12 @@ class AlphaBetaSearch {
 
   int _alphaBeta(int depth, int alpha, int beta, int ply) {
     if (_stopped) return 0;
+    // Periodic time check so a deep iteration can abort mid-tree. Checked every
+    // 256 nodes (~17ms at current speeds) to keep budget overshoot small.
+    if (_deadlineMs > 0 && (_nodes & 255) == 0 && _timeUp) {
+      _stopped = true;
+      return 0;
+    }
 
     // Generate moves ONCE — use result to detect checkmate/stalemate
     final moves = _game.generate_moves();
@@ -115,7 +154,7 @@ class AlphaBetaSearch {
       return _game.in_check ? (-99999 + ply) : 0;
     }
 
-    if (_game.half_moves >= 100 || _game.in_threefold_repetition) return 0;
+    if (_game.half_moves >= 100 || _isRepetition()) return 0;
 
     if (depth <= 0) return _quiescence(alpha, beta, ply);
 
@@ -133,17 +172,22 @@ class AlphaBetaSearch {
     // If the score still exceeds beta, the position is so good we can prune.
     // Don't use in check, at low depth, or near endgame (zugzwang risk).
     if (depth >= 3 && !_game.in_check && ply > 0) {
-      // Simulate null move by swapping turn in FEN
-      final fen = _game.fen;
-      final parts = fen.split(' ');
-      parts[1] = parts[1] == 'w' ? 'b' : 'w'; // swap turn
-      parts[3] = '-'; // clear en passant
-      final nullFen = parts.join(' ');
-      final savedFen = fen;
+      // In-place null move: hand the turn to the opponent without touching the
+      // board or the undo history. The previous implementation used
+      // `_game.load()`, which calls `clear()` and wipes the history stack —
+      // corrupting every ancestor's pending `undo()` and producing nonsense
+      // moves. Saving/restoring turn + en-passant is O(1) and correct.
+      final savedTurn = _game.turn;
+      final savedEp = _game.ep_square;
+      _game.turn = savedTurn == chess.Color.WHITE
+          ? chess.Color.BLACK
+          : chess.Color.WHITE;
+      _game.ep_square = chess.Chess.EMPTY;
 
-      _game.load(nullFen);
       final nullScore = -_alphaBeta(depth - 1 - 2, -beta, -beta + 1, ply + 1);
-      _game.load(savedFen);
+
+      _game.turn = savedTurn;
+      _game.ep_square = savedEp;
 
       if (nullScore >= beta) {
         return beta; // Null move cutoff
@@ -151,7 +195,7 @@ class AlphaBetaSearch {
     }
 
     // TT lookup
-    final hash = _quickHash();
+    final hash = _positionKey();
     final ttEntry = _tt.probe(hash);
     if (ttEntry != null && ttEntry.depth >= depth) {
       switch (ttEntry.flag) {
@@ -205,7 +249,7 @@ class AlphaBetaSearch {
           score = -_alphaBeta(depth - 1, -beta, -alpha, ply + 1);
         }
       }
-      _game.undo();
+      _unmakeMove();
       moveIndex++;
 
       if (score > bestScore) {
@@ -283,7 +327,7 @@ class AlphaBetaSearch {
       _makeMove(cap.move);
       _nodes++;
       final score = -_quiescence(-beta, -alpha, ply + 1);
-      _game.undo();
+      _unmakeMove();
 
       if (score >= beta) return beta;
       if (score > alpha) alpha = score;
@@ -292,18 +336,29 @@ class AlphaBetaSearch {
     return alpha;
   }
 
-  /// Fast position hash using FEN's piece placement + turn.
-  /// Skips castling/en-passant/move counts for speed while
-  /// retaining enough uniqueness for the TT.
-  int _quickHash() {
-    final fen = _game.fen;
-    // Hash only piece placement + turn (first two FEN fields)
-    // This is faster than hashing the full FEN string
-    final spaceIdx = fen.indexOf(' ');
-    if (spaceIdx < 0) return fen.hashCode;
-    final secondSpace = fen.indexOf(' ', spaceIdx + 1);
-    final key = secondSpace > 0 ? fen.substring(0, secondSpace) : fen;
-    return key.hashCode;
+  /// Fast position key folded directly from the board array.
+  ///
+  /// Avoids rebuilding the FEN string (which `_game.fen` does every call by
+  /// scanning the board *and* allocating), and — unlike the old FEN-prefix
+  /// hash — includes castling rights and the en-passant square, so distinct
+  /// positions no longer collide in the transposition table. FNV-1a mixing.
+  int _positionKey() {
+    var h = 0xcbf29ce484222325;
+    const prime = 0x100000001b3;
+    final board = _game.board;
+    for (var i = chess.Chess.SQUARES_A8; i <= chess.Chess.SQUARES_H1; i++) {
+      if ((i & 0x88) != 0) continue; // skip off-board 0x88 squares
+      final piece = board[i];
+      if (piece != null) {
+        h = (h ^ (i * 13 + piece.type.shift * 2 + piece.color.index + 1)) *
+            prime;
+      }
+    }
+    h = (h ^ (_game.turn == chess.Color.WHITE ? 1 : 2)) * prime;
+    h = (h ^ _game.castling[chess.Color.WHITE]) * prime;
+    h = (h ^ _game.castling[chess.Color.BLACK]) * prime;
+    h = (h ^ ((_game.ep_square ?? chess.Chess.EMPTY) + 2)) * prime;
+    return h;
   }
 
   /// Make a move using a reusable map to reduce GC pressure.
@@ -317,7 +372,33 @@ class AlphaBetaSearch {
     _moveMap['from'] = move.fromAlgebraic;
     _moveMap['to'] = move.toAlgebraic;
     _moveMap['promotion'] = move.promotion?.name;
-    _game.move(_moveMap);
+    final ok = _game.move(_moveMap);
+    // Invariant: every move we make came from generate_moves() on the current
+    // position, so it must be accepted. A rejection means board state and the
+    // move list have desynced (e.g. something restored `turn` behind our back)
+    // and would silently corrupt the search via a mismatched undo().
+    assert(ok,
+        'move() rejected ${move.fromAlgebraic}${move.toAlgebraic} turn=${_game.turn}');
+    _path.add(_positionKey());
+  }
+
+  void _unmakeMove() {
+    _path.removeLast();
+    _game.undo();
+  }
+
+  /// Cheap repetition check: has the current position (top of [_path]) already
+  /// occurred earlier on this search line? Position keys include side-to-move,
+  /// castling rights and the en-passant square, so only truly identical
+  /// positions match. O(path length) integer compares — no FEN rebuilding.
+  bool _isRepetition() {
+    if (_path.length < 5) return false;
+    final key = _path.last;
+    // Same position recurs every 2 plies at the earliest; step back by two.
+    for (var i = _path.length - 3; i >= 0; i -= 2) {
+      if (_path[i] == key) return true;
+    }
+    return false;
   }
 
   String _moveToUci(chess.Move move) {

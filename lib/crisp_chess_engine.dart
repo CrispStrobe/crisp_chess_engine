@@ -32,8 +32,13 @@ export 'src/evaluation.dart' show evaluate, pieceValues;
 /// and returns the [SearchResult] — including the best move in UCI notation
 /// (e.g. `e2e4`) — or `null` if the side to move has no legal moves
 /// (checkmate or stalemate).
-SearchResult? searchPosition(String fen, {int depth = 6}) {
+///
+/// Pass [timeBudget] to bound how long the search may run: it returns the best
+/// move from the last fully completed depth once the budget is spent. Strongly
+/// recommended on interactive/mobile callers — a fixed [depth] of 8+ can take
+/// tens of seconds.
+SearchResult? searchPosition(String fen, {int depth = 6, Duration? timeBudget}) {
   final game = chess.Chess();
   game.load(fen);
-  return AlphaBetaSearch(game).search(depth);
+  return AlphaBetaSearch(game).search(depth, timeBudget: timeBudget);
 }
