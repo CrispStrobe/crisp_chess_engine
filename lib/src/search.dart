@@ -38,8 +38,15 @@ class AlphaBetaSearch {
   // history on every node (~1ms/node) and dominated search time.
   final List<int> _path = <int>[];
 
-  AlphaBetaSearch(this._game)
-      : _killers = List.generate(64, (_) => [null, null]);
+  // Prior game position keys (from [positionKeyOf]), in order. Seeds [_path] so
+  // the search avoids repeating positions already reached in the actual game —
+  // otherwise it can draw a won game by walking into a repetition. Empty if the
+  // caller passes no history (unchanged behaviour).
+  final List<int> _gameHistory;
+
+  AlphaBetaSearch(this._game, {List<int>? repetitionHistory})
+      : _killers = List.generate(64, (_) => [null, null]),
+        _gameHistory = repetitionHistory ?? const [];
 
   void stop() => _stopped = true;
 
@@ -60,7 +67,9 @@ class AlphaBetaSearch {
   }) {
     _stopped = false;
     _nodes = 0;
-    _path.clear();
+    _path
+      ..clear()
+      ..addAll(_gameHistory); // seed repetition detection with the game so far
     _deadlineMs = timeBudget?.inMilliseconds ?? 0;
     _clock
       ..reset()
@@ -348,9 +357,15 @@ class AlphaBetaSearch {
   /// the VM and under dart2js (where ints are doubles and a 64-bit multiply
   /// would lose precision, or a 64-bit literal would not even compile). The
   /// engine runs on web too, so this has to be dart2js-safe.
-  int _positionKey() {
+  int _positionKey() => positionKeyOf(_game);
+
+  /// Position key for [game] — the same 32-bit key the search uses internally.
+  /// Exposed so callers can build a `repetitionHistory` list from the prior
+  /// positions of a game (each key must be computed with this function so it
+  /// matches the search's key-space).
+  static int positionKeyOf(chess.Chess game) {
     var h = 0;
-    final board = _game.board;
+    final board = game.board;
     for (var i = chess.Chess.SQUARES_A8; i <= chess.Chess.SQUARES_H1; i++) {
       if ((i & 0x88) != 0) continue; // skip off-board 0x88 squares
       final piece = board[i];
@@ -358,10 +373,10 @@ class AlphaBetaSearch {
         h = _mix(h, i * 13 + piece.type.shift * 2 + piece.color.index + 1);
       }
     }
-    h = _mix(h, _game.turn == chess.Color.WHITE ? 1 : 2);
-    h = _mix(h, _game.castling[chess.Color.WHITE]);
-    h = _mix(h, _game.castling[chess.Color.BLACK]);
-    h = _mix(h, (_game.ep_square ?? chess.Chess.EMPTY) + 2);
+    h = _mix(h, game.turn == chess.Color.WHITE ? 1 : 2);
+    h = _mix(h, game.castling[chess.Color.WHITE]);
+    h = _mix(h, game.castling[chess.Color.BLACK]);
+    h = _mix(h, (game.ep_square ?? chess.Chess.EMPTY) + 2);
     // Finalization avalanche.
     h = (h + (h << 3)) & 0xffffffff;
     h ^= h >> 11;

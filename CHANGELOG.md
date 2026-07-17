@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.8.0
+
+Brings the chess-package `AlphaBetaSearch` (the web / non-native path) up to par
+with the bitboard engine on endgames and repetitions.
+
+### Added
+
+- `AlphaBetaSearch(..., repetitionHistory: [...])` — seeds repetition detection
+  with the game's prior positions, same as the bitboard engine. Without it the
+  web search could draw a won game (or shuffle a won ending) by repetition.
+- `AlphaBetaSearch.positionKeyOf(game)` — the search's position key, exposed so
+  callers can build the `repetitionHistory` list from a game's prior positions.
+- Endgame mop-up in the chess-package `evaluate()` (mirrors the bitboard term):
+  in a bare-king ending with mating material, drives the lone king to a corner
+  and the strong king in. Fires only when a king is bare, so contested
+  positions are unaffected.
+
+Together these let the web search convert K+R vs K / K+Q vs K at shallow depth
+instead of shuffling. Both additions are backward compatible.
+
 ## 0.7.0
 
 Repetition awareness across the actual game, not just the search tree.

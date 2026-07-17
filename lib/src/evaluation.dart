@@ -567,8 +567,51 @@ int evaluate(chess.Chess game) {
   // Mobility bonus: number of legal moves
   final mobility = game.generate_moves().length;
 
-  final score = whiteScore - blackScore + (mobility * 2);
+  final score =
+      whiteScore - blackScore + (mobility * 2) + _mopUpWhitePov(game);
 
   // Return from side-to-move's perspective
   return game.turn == chess.Color.WHITE ? score : -score;
+}
+
+/// Endgame mop-up (White's point of view): in a bare-king ending — one side has
+/// only its king, the other has a rook or queen — drive the lone king toward a
+/// corner and bring the strong king in. Without this gradient a shallow search
+/// just shuffles and never converts. Mirrors the bitboard engine's term. Only
+/// fires when a king is truly bare, so contested positions are untouched.
+int _mopUpWhitePov(chess.Chess game) {
+  var whiteNonKing = 0, blackNonKing = 0;
+  var whiteHeavy = false, blackHeavy = false;
+  for (final i in chess.Chess.SQUARES.values) {
+    final piece = game.board[i];
+    if (piece == null || piece.type == chess.PieceType.KING) continue;
+    final heavy = piece.type == chess.PieceType.ROOK ||
+        piece.type == chess.PieceType.QUEEN;
+    if (piece.color == chess.Color.WHITE) {
+      whiteNonKing++;
+      whiteHeavy = whiteHeavy || heavy;
+    } else {
+      blackNonKing++;
+      blackHeavy = blackHeavy || heavy;
+    }
+  }
+  final whiteBare = whiteNonKing == 0, blackBare = blackNonKing == 0;
+  if (whiteBare == blackBare) return 0; // both bare, or neither
+
+  if (blackBare) {
+    if (!whiteHeavy) return 0; // K+B/K+N can't force mate
+    return _mopUp(game.kings[chess.Color.BLACK], game.kings[chess.Color.WHITE]);
+  }
+  if (!blackHeavy) return 0;
+  return -_mopUp(game.kings[chess.Color.WHITE], game.kings[chess.Color.BLACK]);
+}
+
+int _mopUp(int loneKing, int strongKing) {
+  final lf = chess.Chess.file(loneKing), lr = chess.Chess.rank(loneKing);
+  final fd = lf < 4 ? 3 - lf : lf - 4;
+  final rd = lr < 4 ? 3 - lr : lr - 4;
+  final cornerDrive = fd + rd; // 0 (centre) .. 6 (corner)
+  final dist = (lf - chess.Chess.file(strongKing)).abs() +
+      (lr - chess.Chess.rank(strongKing)).abs();
+  return cornerDrive * 14 + (14 - dist) * 8;
 }
