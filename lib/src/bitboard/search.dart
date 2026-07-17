@@ -44,7 +44,12 @@ class BitboardSearch {
   // Position hashes along the current search path, for repetition detection.
   final List<int> _path = [];
 
-  BitboardSearch(this.pos);
+  // Leaf evaluator. Overridable so alternative evaluations can be A/B tested in
+  // self-play without touching the search; defaults to [evaluatePosition].
+  final int Function(Position) _eval;
+
+  BitboardSearch(this.pos, {int Function(Position)? evaluator})
+      : _eval = evaluator ?? evaluatePosition;
 
   void stop() => _stopped = true;
 
@@ -273,7 +278,7 @@ class BitboardSearch {
       return 0;
     }
 
-    final standPat = evaluatePosition(pos);
+    final standPat = _eval(pos);
     if (standPat >= beta) return beta;
     if (standPat > alpha) alpha = standPat;
     if (ply >= _maxPly - 1) return standPat;

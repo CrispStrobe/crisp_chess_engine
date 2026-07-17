@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.5.0
+
+Positional evaluation terms for the bitboard engine, verified stronger by
+self-play. Cost-free (no measurable nodes/sec impact) with no tactical
+regression.
+
+### Added
+
+- Evaluation now includes the **bishop pair** bonus and **pawn structure**
+  (doubled, isolated and passed pawns) on top of material + piece-square tables.
+  In deterministic fixed-depth self-play from 18 openings (both colours) the new
+  evaluation scores ~54-62% against the material+PST baseline.
+- `evaluateMaterialPst` — the material+PST-only evaluation, exposed as a
+  lightweight alternative and the A/B baseline (`test/selfplay.dart`).
+- `BitboardSearch` takes an optional `evaluator` so alternative evaluations can
+  be dropped in (used by the self-play harness).
+- `Position.see` is public (already used internally for quiescence pruning).
+
+A mobility term was tried and **dropped**: it was ~40% slower and its per-node
+value cancelled against the shallower search that cost caused, so it was a wash
+in time-budgeted play.
+
 ## 0.4.0
 
 Search efficiency for the bitboard engine: ~32% fewer nodes to reach a given

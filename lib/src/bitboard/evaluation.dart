@@ -38,36 +38,131 @@ int _blackIdx(int sq) => (sq >> 3) * 8 + (sq & 7);
 /// No terminal/draw detection here — the search owns that (it scores mate and
 /// stalemate from an empty move list and handles the 50-move rule / repetition).
 int evaluatePosition(Position p) {
-  var whiteScore = 0;
-  var blackScore = 0;
+  final white_ = _materialPstWhitePov(p) + _extendedWhitePov(p);
+  return p.turn == white ? white_ : -white_;
+}
 
-  // Non-pawn, non-king material to pick the king table.
+/// Material + piece-square tables only. Kept as the A/B baseline for the extra
+/// terms in [evaluatePosition] (self-play verification).
+int evaluateMaterialPst(Position p) {
+  final white_ = _materialPstWhitePov(p);
+  return p.turn == white ? white_ : -white_;
+}
+
+
+/// Material + PST, always from White's point of view.
+int _materialPstWhitePov(Position p) {
+  var score = 0;
+
   var nonPawnMaterial = 0;
   for (final t in [knight, bishop, rook, queen]) {
     nonPawnMaterial +=
         popcount(p.pieces[white][t] | p.pieces[black][t]) * pieceValue[t];
   }
-  final isEndgame = nonPawnMaterial < 1300;
-  final kingTable = isEndgame ? _kingEndgameTable : _kingMiddlegameTable;
+  final kingTable =
+      nonPawnMaterial < 1300 ? _kingEndgameTable : _kingMiddlegameTable;
 
   for (var type = pawn; type <= king; type++) {
     final table = type == king ? kingTable : _pieceTables[type];
     final v = pieceValue[type];
-
     var wbb = p.pieces[white][type];
     while (wbb != 0) {
       final sq = lsb(wbb);
       wbb &= wbb - 1;
-      whiteScore += v + table[_whiteIdx(sq)];
+      score += v + table[_whiteIdx(sq)];
     }
     var bbb = p.pieces[black][type];
     while (bbb != 0) {
       final sq = lsb(bbb);
       bbb &= bbb - 1;
-      blackScore += v + table[_blackIdx(sq)];
+      score -= v + table[_blackIdx(sq)];
     }
   }
+  return score;
+}
 
-  final score = whiteScore - blackScore;
-  return p.turn == white ? score : -score;
+// ---- Extended terms (White's point of view) --------------------------------
+
+const int _bishopPairBonus = 30;
+const int _doubledPawnPenalty = 12;
+const int _isolatedPawnPenalty = 15;
+// Passed-pawn bonus by the pawn's rank from its own side (rank 1..7).
+const List<int> _passedByRank = [0, 8, 12, 20, 34, 55, 90, 0];
+
+// Bishop pair + pawn structure. A mobility term was tried but dropped: it made
+// the eval ~40% slower for no net gain under a time budget (the shallower
+// search it caused cancelled its per-node value in self-play).
+int _extendedWhitePov(Position p) {
+  return _bishopPairWhitePov(p) + _pawnStructureWhitePov(p);
+}
+
+int _bishopPairWhitePov(Position p) {
+  var s = 0;
+  if (popcount(p.pieces[white][bishop]) >= 2) s += _bishopPairBonus;
+  if (popcount(p.pieces[black][bishop]) >= 2) s -= _bishopPairBonus;
+  return s;
+}
+
+int _pawnStructureWhitePov(Position p) {
+  final wp = p.pieces[white][pawn];
+  final bp = p.pieces[black][pawn];
+  var s = 0;
+
+  // Doubled + isolated (both colors).
+  for (var f = 0; f < 8; f++) {
+    final wOnFile = popcount(wp & _fileBb[f]);
+    if (wOnFile > 1) s -= _doubledPawnPenalty * (wOnFile - 1);
+    if (wOnFile > 0 && (wp & _adjFiles[f]) == 0) s -= _isolatedPawnPenalty;
+
+    final bOnFile = popcount(bp & _fileBb[f]);
+    if (bOnFile > 1) s += _doubledPawnPenalty * (bOnFile - 1);
+    if (bOnFile > 0 && (bp & _adjFiles[f]) == 0) s += _isolatedPawnPenalty;
+  }
+
+  // Passed pawns.
+  var bb = wp;
+  while (bb != 0) {
+    final sq = lsb(bb);
+    bb &= bb - 1;
+    if ((_whitePassed[sq] & bp) == 0) s += _passedByRank[sq >> 3];
+  }
+  bb = bp;
+  while (bb != 0) {
+    final sq = lsb(bb);
+    bb &= bb - 1;
+    if ((_blackPassed[sq] & wp) == 0) s -= _passedByRank[7 - (sq >> 3)];
+  }
+  return s;
+}
+
+// File / passed-pawn masks, built once.
+final List<int> _fileBb = List.generate(8, (f) {
+  var b = 0;
+  for (var r = 0; r < 8; r++) {
+    b |= 1 << (r * 8 + f);
+  }
+  return b;
+});
+final List<int> _adjFiles = List.generate(
+    8, (f) => (f > 0 ? _fileBb[f - 1] : 0) | (f < 7 ? _fileBb[f + 1] : 0));
+
+final List<int> _whitePassed = List.generate(64, (sq) => _passedMask(sq, true));
+final List<int> _blackPassed = List.generate(64, (sq) => _passedMask(sq, false));
+
+int _passedMask(int sq, bool forWhite) {
+  final f = sq & 7, r = sq >> 3;
+  var b = 0;
+  for (var ff = f - 1; ff <= f + 1; ff++) {
+    if (ff < 0 || ff > 7) continue;
+    if (forWhite) {
+      for (var rr = r + 1; rr < 8; rr++) {
+        b |= 1 << (rr * 8 + ff);
+      }
+    } else {
+      for (var rr = r - 1; rr >= 0; rr--) {
+        b |= 1 << (rr * 8 + ff);
+      }
+    }
+  }
+  return b;
 }
