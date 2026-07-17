@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.3.0
+
+Adds a native bitboard engine — 20-60x the nodes/sec of the original
+chess-package search at equal depth (e.g. a depth-8 midgame search dropped from
+~37s to ~0.8s).
+
+### Added
+
+- `package:crisp_chess_engine/bitboard.dart` — a self-contained bitboard core:
+  `Position` (board state, make/unmake, move generation, FEN), `perft`,
+  `evaluatePosition`, and `BitboardSearch` (alpha-beta + PVS + null-move +
+  quiescence + transposition table + MVV-LVA/killer/history ordering + a time
+  budget). Move generation is verified by perft against the six standard
+  reference positions (startpos, Kiwipete, positions 3-6).
+
+  **Native (Dart VM / AOT) only.** Bitboards are 64-bit and rely on 64-bit
+  integer literals and operations, which dart2js cannot represent. Do not import
+  this library from code that compiles to JavaScript — use the existing
+  `AlphaBetaSearch` (which runs on `package:chess`) on web.
+
+The original `AlphaBetaSearch` API is unchanged.
+
 ## 0.2.0
 
 Correctness and performance release. Anyone on 0.1.0 should upgrade: the search
