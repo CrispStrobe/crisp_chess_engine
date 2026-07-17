@@ -106,6 +106,14 @@ class Position {
       } else if (RegExp(r'[1-8]').hasMatch(ch)) {
         file += int.parse(ch);
       } else {
+        // A malformed placement (too many pieces in a rank, or too many ranks)
+        // pushes the square outside 0..63; guard it so it rejects with a clear
+        // ArgumentError like `_pieceTypeFromChar` does, not a cryptic RangeError
+        // out of `_addPiece`'s mailbox.
+        if (rank < 0 || file > 7) {
+          throw ArgumentError(
+              'FEN piece placement out of bounds (rank $rank, file $file)');
+        }
         final color = ch == ch.toUpperCase() ? white : black;
         final type = _pieceTypeFromChar(ch.toLowerCase());
         p._addPiece(color, type, rank * 8 + file);
@@ -128,9 +136,8 @@ class Position {
         }
       }
     }
-    p.epSquare = (parts.length > 3 && parts[3] != '-')
-        ? _squareFromName(parts[3])
-        : -1;
+    p.epSquare =
+        (parts.length > 3 && parts[3] != '-') ? _squareFromName(parts[3]) : -1;
     p.halfmove = parts.length > 4 ? int.tryParse(parts[4]) ?? 0 : 0;
     p.fullmove = parts.length > 5 ? int.tryParse(parts[5]) ?? 1 : 1;
     return p;
@@ -151,7 +158,8 @@ class Position {
   bool isSquareAttacked(int sq, int byColor) {
     // Pawns: a square is attacked by byColor pawns from the opposite pawn's
     // capture pattern.
-    if ((pawnAttacks[byColor ^ 1][sq] & pieces[byColor][pawn]) != 0) return true;
+    if ((pawnAttacks[byColor ^ 1][sq] & pieces[byColor][pawn]) != 0)
+      return true;
     if ((knightAttacks[sq] & pieces[byColor][knight]) != 0) return true;
     if ((kingAttacks[sq] & pieces[byColor][king]) != 0) return true;
     final bishopsQueens = pieces[byColor][bishop] | pieces[byColor][queen];
@@ -165,8 +173,7 @@ class Position {
 
   /// After [makeMove], whether the side that just moved left its own king safe
   /// (i.e. the move was legal). Cheap legality filter for search/perft.
-  bool get moverKingSafe =>
-      !isSquareAttacked(_kingSquareOf(turn ^ 1), turn);
+  bool get moverKingSafe => !isSquareAttacked(_kingSquareOf(turn ^ 1), turn);
 
   static const List<int> _seeValues = [100, 320, 330, 500, 900, 20000];
 
@@ -290,7 +297,8 @@ class Position {
     while (bb != 0) {
       final from = lsb(bb);
       bb &= bb - 1;
-      _genFromTargets(out, from, bishopAttacks(from, occAll) & ~ownOcc, enemyOcc);
+      _genFromTargets(
+          out, from, bishopAttacks(from, occAll) & ~ownOcc, enemyOcc);
     }
     // Rooks.
     bb = pieces[us][rook];
@@ -304,7 +312,8 @@ class Position {
     while (bb != 0) {
       final from = lsb(bb);
       bb &= bb - 1;
-      _genFromTargets(out, from, queenAttacks(from, occAll) & ~ownOcc, enemyOcc);
+      _genFromTargets(
+          out, from, queenAttacks(from, occAll) & ~ownOcc, enemyOcc);
     }
     _genCastles(out, us, them);
   }
@@ -325,7 +334,9 @@ class Position {
       pbb &= pbb - 1;
       // Quiet promotion push.
       final one = from + fwd;
-      if (one >= 0 && one < 64 && (empty & (1 << one)) != 0 &&
+      if (one >= 0 &&
+          one < 64 &&
+          (empty & (1 << one)) != 0 &&
           (one >> 3) == promoRank) {
         _addPromotions(out, from, one, false);
       }
@@ -373,8 +384,7 @@ class Position {
     }
   }
 
-  void _genPawnMoves(
-      List<int> out, int us, int them, int enemyOcc, int empty) {
+  void _genPawnMoves(List<int> out, int us, int them, int enemyOcc, int empty) {
     final fwd = us == white ? 8 : -8;
     final startRank = us == white ? 1 : 6;
     final promoRank = us == white ? 7 : 0;
