@@ -709,6 +709,21 @@ int _pieceTypeFromChar(String c) {
 String _pieceChar(int type) => const ['p', 'n', 'b', 'r', 'q', 'k'][type];
 
 int _squareFromName(String s) {
+  // GUARD:epsquare >>>
+  // A malformed square token — e.g. a 1-char en-passant field like "e", or an
+  // out-of-range name like "z9" — must reject with a clean ArgumentError. Guard
+  // here so `codeUnitAt(1)` cannot leak a RangeError on a short string, and so
+  // an out-of-range name cannot become an out-of-bounds mailbox index later.
+  // (In Dart RangeError extends ArgumentError, so an ArgumentError allow-list
+  // silently masked this crash — reject deliberately instead.)
+  if (s.length != 2 ||
+      s.codeUnitAt(0) < 0x61 ||
+      s.codeUnitAt(0) > 0x68 ||
+      s.codeUnitAt(1) < 0x31 ||
+      s.codeUnitAt(1) > 0x38) {
+    throw ArgumentError('bad square name: "$s"');
+  }
+  // GUARD:epsquare <<<
   final file = s.codeUnitAt(0) - 0x61; // 'a'
   final rank = s.codeUnitAt(1) - 0x31; // '1'
   return rank * 8 + file;
